@@ -213,6 +213,12 @@ body { background: var(--bg); color: var(--text); font-family: 'Instrument Sans'
 .modal p { color: var(--text-muted); font-size: 14px; margin-bottom: 20px; }
 .modal-actions { display: flex; flex-direction: column; gap: 10px; }
 
+/* Macro rings */
+.macro-ring-wrap { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.macro-ring-val { font-family: 'Bricolage Grotesque', sans-serif; font-weight: 700; font-size: 13px; }
+.macro-ring-lbl { font-size: 9px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-muted); }
+.macro-ring-sub { font-size: 9px; color: var(--text-muted); }
+
 /* Drinks */
 .drink-btn { display: flex; flex-direction: column; align-items: center; gap: 5px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 14px 10px 10px; cursor: pointer; transition: border-color 0.2s, transform 0.1s; flex-shrink: 0; width: 82px; position: relative; }
 .drink-btn:active { transform: scale(0.94); border-color: rgba(96,165,250,0.5); }
@@ -373,10 +379,13 @@ body { background: var(--bg); color: var(--text); font-family: 'Instrument Sans'
         <div id="sum-net-lines"></div>
         <div class="cal-goal" id="sum-goal">0 / 2000 kcal</div>
         <div class="progress-bar-wrap"><div class="progress-bar" id="sum-progress" style="width:0%"></div></div>
-        <div class="macros-grid">
-          <div class="macro-tile prot"><div class="val" id="sum-prot">0g</div><div class="lbl">Protéines</div></div>
-          <div class="macro-tile carb"><div class="val" id="sum-carb">0g</div><div class="lbl">Glucides</div></div>
-          <div class="macro-tile fat"><div class="val" id="sum-fat">0g</div><div class="lbl">Lipides</div></div>
+        <!-- Macro rings -->
+        <div id="macro-rings" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px"></div>
+        <!-- Legacy hidden values for compatibility -->
+        <div style="display:none">
+          <div id="sum-prot">0g</div>
+          <div id="sum-carb">0g</div>
+          <div id="sum-fat">0g</div>
         </div>
       </div>
     </div>
@@ -625,8 +634,24 @@ body { background: var(--bg); color: var(--text); font-family: 'Instrument Sans'
     <div class="settings-card">
       <div class="settings-row">
         <div>
-          <div class="sr-label">Objectif protéines</div>
-          <div class="sr-sub" id="prot-display">— g / jour</div>
+          <div class="sr-label">Objectifs nutritionnels / jour</div>
+          <div class="sr-sub" id="macro-goals-display">—</div>
+        </div>
+        <div class="sr-action" onclick="toggleMacroGoals()">Modifier</div>
+      </div>
+      <div class="api-edit-form" id="macro-goals-form">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+          <div><div class="edit-label" style="margin-bottom:4px">Protéines (g)</div><input class="field" type="number" id="goal-prot" placeholder="278"></div>
+          <div><div class="edit-label" style="margin-bottom:4px">Glucides (g)</div><input class="field" type="number" id="goal-carb" placeholder="200"></div>
+          <div><div class="edit-label" style="margin-bottom:4px">Sucres (g)</div><input class="field" type="number" id="goal-sugar" placeholder="50"></div>
+          <div><div class="edit-label" style="margin-bottom:4px">Lipides (g)</div><input class="field" type="number" id="goal-fat" placeholder="70"></div>
+          <div><div class="edit-label" style="margin-bottom:4px">G. saturées (g)</div><input class="field" type="number" id="goal-satfat" placeholder="20"></div>
+          <div><div class="edit-label" style="margin-bottom:4px">Fibres (g)</div><input class="field" type="number" id="goal-fiber" placeholder="30"></div>
+          <div><div class="edit-label" style="margin-bottom:4px">Sel (g)</div><input class="field" type="number" id="goal-salt" placeholder="5"></div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-green" style="flex:1;padding:11px" onclick="saveMacroGoals()">Enregistrer</button>
+          <button class="btn btn-ghost" style="flex:1;padding:11px" onclick="toggleMacroGoals()">Annuler</button>
         </div>
       </div>
     </div>
@@ -875,7 +900,9 @@ let userGoal    = 2000;
 let currentResult = null;
 let currentImageB64 = null;
 let editingItems = [];
-let bodyStats = { weight: 166, height: 178, age: 26, tdee: 2800, target: 100, deficit: 500 };
+let bodyStats = { weight: 166, height: 178, age: 26, tdee: 2800, target: 100, deficit: 500,
+  goals: { protein_g: 278, carbs_g: 200, sugar_g: 50, fat_g: 70, saturated_fat_g: 20, fiber_g: 30, salt_g: 5 }
+};
 
 // ── AUTH ──
 onAuthStateChanged(auth, async user => {
@@ -924,7 +951,7 @@ async function loadUserProfile(user) {
     const d = snap.data();
     userApiKey = d.apiKey || '';
     userGoal   = d.goal  || 2000;
-    if (d.bodyStats) bodyStats = { ...bodyStats, ...d.bodyStats };
+    if (d.bodyStats) bodyStats = { ...bodyStats, ...d.bodyStats, goals: { ...bodyStats.goals, ...(d.bodyStats.goals||{}) } };
   } else {
     await setDoc(ref, { email: user.email, goal: 2000, apiKey: '', createdAt: new Date(),
       bodyStats: { weight:166, height:178, age:26, tdee:2800, target:100, deficit:500 } });
@@ -940,6 +967,7 @@ function updateProfileUI(user) {
   document.getElementById('profile-email').textContent  = user.email;
   refreshGoalUI();
   refreshBodyUI();
+  refreshMacroGoalsUI();
   updateApiStatus();
   updateDateLabel();
 }
@@ -1125,13 +1153,17 @@ const PROMPT = `Tu es un nutritionniste expert. Analyse ce repas et retourne UNI
   "total_calories": 450,
   "protein_g": 25,
   "carbs_g": 45,
+  "sugar_g": 12,
   "fat_g": 15,
+  "saturated_fat_g": 5,
+  "fiber_g": 3,
+  "salt_g": 0.8,
   "items": [
-    { "name": "Nom aliment", "portion": "200g", "calories": 200, "protein_g": 10, "carbs_g": 20, "fat_g": 5 }
+    { "name": "Nom aliment", "portion": "200g", "calories": 200, "protein_g": 10, "carbs_g": 20, "sugar_g": 5, "fat_g": 5, "saturated_fat_g": 2, "fiber_g": 1, "salt_g": 0.3 }
   ]
 }
 
-Estime les quantités si non précisées. Sois précis et réaliste.`;
+Estime les quantités si non précisées. Sois précis et réaliste. Inclus toujours tous les champs nutritionnels.`;
 
 async function callClaude(messages, model = 'claude-opus-4-6') {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -1162,11 +1194,20 @@ function showResult(data) {
 }
 
 function updateResultTotals() {
-  const t = editingItems.reduce((a,it) => ({ cal:a.cal+(+it.calories||0), p:a.p+(+it.protein_g||0), c:a.c+(+it.carbs_g||0), f:a.f+(+it.fat_g||0) }), {cal:0,p:0,c:0,f:0});
-  document.getElementById('res-kcal').innerHTML = Math.round(t.cal) + ' <span>kcal</span>';
-  document.getElementById('res-prot').textContent  = Math.round(t.p) + 'g';
-  document.getElementById('res-carbs').textContent = Math.round(t.c) + 'g';
-  document.getElementById('res-fat').textContent   = Math.round(t.f) + 'g';
+  const t = editingItems.reduce((a,it) => ({
+    cal: a.cal+(+it.calories||0),
+    p:   a.p  +(+it.protein_g||0),
+    c:   a.c  +(+it.carbs_g||0),
+    s:   a.s  +(+it.sugar_g||0),
+    f:   a.f  +(+it.fat_g||0),
+    sf:  a.sf +(+it.saturated_fat_g||0),
+    fi:  a.fi +(+it.fiber_g||0),
+    sa:  a.sa +(+it.salt_g||0),
+  }), {cal:0,p:0,c:0,s:0,f:0,sf:0,fi:0,sa:0});
+  document.getElementById('res-kcal').innerHTML  = Math.round(t.cal) + ' <span>kcal</span>';
+  document.getElementById('res-prot').textContent  = Math.round(t.p*10)/10 + 'g';
+  document.getElementById('res-carbs').textContent = Math.round(t.c*10)/10 + 'g';
+  document.getElementById('res-fat').textContent   = Math.round(t.f*10)/10 + 'g';
   if (currentResult) currentResult._totals = t;
 }
 
@@ -1242,23 +1283,31 @@ window.saveMeal = async () => {
 
   // Recalcul des totaux depuis editingItems
   const t = editingItems.reduce((a, it) => ({
-    cal: a.cal + (+it.calories  || 0),
-    p:   a.p   + (+it.protein_g || 0),
-    c:   a.c   + (+it.carbs_g   || 0),
-    f:   a.f   + (+it.fat_g     || 0),
-  }), { cal: 0, p: 0, c: 0, f: 0 });
+    cal: a.cal + (+it.calories       || 0),
+    p:   a.p   + (+it.protein_g      || 0),
+    c:   a.c   + (+it.carbs_g        || 0),
+    s:   a.s   + (+it.sugar_g        || 0),
+    f:   a.f   + (+it.fat_g          || 0),
+    sf:  a.sf  + (+it.saturated_fat_g|| 0),
+    fi:  a.fi  + (+it.fiber_g        || 0),
+    sa:  a.sa  + (+it.salt_g         || 0),
+  }), { cal:0, p:0, c:0, s:0, f:0, sf:0, fi:0, sa:0 });
 
   const meal = {
-    uid:       currentUser.uid,
-    date:      getTodayKey(),
-    savedAt:   new Date(),
-    title:     currentResult.title   || 'Repas',
-    emoji:     currentResult.emoji   || '🍽️',
-    calories:  Math.round(t.cal),
-    protein_g: Math.round(t.p),
-    carbs_g:   Math.round(t.c),
-    fat_g:     Math.round(t.f),
-    items:     editingItems.map(({ _id, ...rest }) => rest)
+    uid:            currentUser.uid,
+    date:           getTodayKey(),
+    savedAt:        new Date(),
+    title:          currentResult.title   || 'Repas',
+    emoji:          currentResult.emoji   || '🍽️',
+    calories:       Math.round(t.cal),
+    protein_g:      Math.round(t.p  * 10) / 10,
+    carbs_g:        Math.round(t.c  * 10) / 10,
+    sugar_g:        Math.round(t.s  * 10) / 10,
+    fat_g:          Math.round(t.f  * 10) / 10,
+    saturated_fat_g:Math.round(t.sf * 10) / 10,
+    fiber_g:        Math.round(t.fi * 10) / 10,
+    salt_g:         Math.round(t.sa * 10) / 10,
+    items:          editingItems.map(({ _id, ...rest }) => rest)
   };
 
   try {
@@ -1294,8 +1343,62 @@ function renderTodayList(meals) {
   }).join('');
 }
 
+// Ring config
+const RING_CONFIG = [
+  { key:'p',  field:'protein_g',       label:'Protéines',  goalKey:'protein_g',       color:'#60a5fa', unit:'g' },
+  { key:'c',  field:'carbs_g',         label:'Glucides',   goalKey:'carbs_g',         color:'#fbbf24', unit:'g' },
+  { key:'s',  field:'sugar_g',         label:'Sucres',     goalKey:'sugar_g',         color:'#f97316', unit:'g' },
+  { key:'f',  field:'fat_g',           label:'Lipides',    goalKey:'fat_g',           color:'#f472b6', unit:'g' },
+  { key:'sf', field:'saturated_fat_g', label:'G. saturées',goalKey:'saturated_fat_g', color:'#e879f9', unit:'g' },
+  { key:'fi', field:'fiber_g',         label:'Fibres',     goalKey:'fiber_g',         color:'#4ade80', unit:'g' },
+  { key:'sa', field:'salt_g',          label:'Sel',        goalKey:'salt_g',          color:'#94a3b8', unit:'g' },
+];
+
+function renderMacroRings(t) {
+  const wrap = document.getElementById('macro-rings');
+  if (!wrap) return;
+  const goals = bodyStats.goals || {};
+  const SIZE = 72, STROKE = 7, R = (SIZE - STROKE) / 2;
+  const CIRC = 2 * Math.PI * R;
+
+  wrap.innerHTML = RING_CONFIG.map(cfg => {
+    const val  = Math.round((t[cfg.key]||0) * 10) / 10;
+    const goal = goals[cfg.goalKey] || 1;
+    const pct  = Math.min(1, val / goal);
+    const dash = pct * CIRC;
+    const over = val > goal;
+    const ringColor = over ? '#f87171' : cfg.color;
+
+    return `<div class="macro-ring-wrap">
+      <svg width="${SIZE}" height="${SIZE}" viewBox="0 0 ${SIZE} ${SIZE}" style="transform:rotate(-90deg)">
+        <circle cx="${SIZE/2}" cy="${SIZE/2}" r="${R}"
+          fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="${STROKE}"/>
+        <circle cx="${SIZE/2}" cy="${SIZE/2}" r="${R}"
+          fill="none" stroke="${ringColor}" stroke-width="${STROKE}"
+          stroke-dasharray="${dash} ${CIRC}"
+          stroke-linecap="round"
+          style="transition:stroke-dasharray 0.5s ease"/>
+        ${pct >= 1 ? `<circle cx="${SIZE/2}" cy="${SIZE/2}" r="${R/2}"
+          fill="${ringColor}" opacity="0.15"/>` : ''}
+      </svg>
+      <div class="macro-ring-val" style="color:${ringColor};margin-top:-4px">${val}${cfg.unit}</div>
+      <div class="macro-ring-lbl">${cfg.label}</div>
+      <div class="macro-ring-sub">/ ${goal}${cfg.unit}</div>
+    </div>`;
+  }).join('');
+}
+
 function updateSummary(meals, activities) {
-  const t = meals.reduce((a,m) => ({ cal:a.cal+(m.calories||0), p:a.p+(m.protein_g||0), c:a.c+(m.carbs_g||0), f:a.f+(m.fat_g||0) }), {cal:0,p:0,c:0,f:0});
+  const t = meals.reduce((a,m) => ({
+    cal: a.cal+(m.calories||0),
+    p:   a.p  +(m.protein_g||0),
+    c:   a.c  +(m.carbs_g||0),
+    s:   a.s  +(m.sugar_g||0),
+    f:   a.f  +(m.fat_g||0),
+    sf:  a.sf +(m.saturated_fat_g||0),
+    fi:  a.fi +(m.fiber_g||0),
+    sa:  a.sa +(m.salt_g||0),
+  }), {cal:0,p:0,c:0,s:0,f:0,sf:0,fi:0,sa:0});
   const acts = activities || todayActivitiesCache || [];
   const burned   = acts.reduce((a,ac) => a + (ac.kcal||0), 0);
   const cal      = Math.round(t.cal);
@@ -1305,9 +1408,10 @@ function updateSummary(meals, activities) {
   const pct      = budget > 0 ? Math.min(100, Math.round((cal / budget) * 100)) : 0;
 
   document.getElementById('sum-cal').innerHTML    = cal + ' <span>kcal</span>';
-  document.getElementById('sum-prot').textContent = Math.round(t.p) + 'g';
-  document.getElementById('sum-carb').textContent = Math.round(t.c) + 'g';
-  document.getElementById('sum-fat').textContent  = Math.round(t.f) + 'g';
+  document.getElementById('sum-prot').textContent = Math.round(t.p*10)/10 + 'g';
+  document.getElementById('sum-carb').textContent = Math.round(t.c*10)/10 + 'g';
+  document.getElementById('sum-fat').textContent  = Math.round(t.f*10)/10 + 'g';
+  renderMacroRings(t);
 
   // Net lines (sport bonus)
   const netEl = document.getElementById('sum-net-lines');
@@ -2627,6 +2731,45 @@ window.saveBodyStats = async () => {
   showToast('✓ Profil mis à jour');
 };
 
+// ── MACRO GOALS ──
+window.toggleMacroGoals = () => {
+  const form = document.getElementById('macro-goals-form');
+  form.classList.toggle('open');
+  if (form.classList.contains('open')) {
+    const g = bodyStats.goals || {};
+    document.getElementById('goal-prot').value   = g.protein_g       || 278;
+    document.getElementById('goal-carb').value   = g.carbs_g         || 200;
+    document.getElementById('goal-sugar').value  = g.sugar_g         || 50;
+    document.getElementById('goal-fat').value    = g.fat_g           || 70;
+    document.getElementById('goal-satfat').value = g.saturated_fat_g || 20;
+    document.getElementById('goal-fiber').value  = g.fiber_g         || 30;
+    document.getElementById('goal-salt').value   = g.salt_g          || 5;
+  }
+};
+
+window.saveMacroGoals = async () => {
+  bodyStats.goals = {
+    protein_g:        parseFloat(document.getElementById('goal-prot').value)   || 278,
+    carbs_g:          parseFloat(document.getElementById('goal-carb').value)   || 200,
+    sugar_g:          parseFloat(document.getElementById('goal-sugar').value)  || 50,
+    fat_g:            parseFloat(document.getElementById('goal-fat').value)    || 70,
+    saturated_fat_g:  parseFloat(document.getElementById('goal-satfat').value) || 20,
+    fiber_g:          parseFloat(document.getElementById('goal-fiber').value)  || 30,
+    salt_g:           parseFloat(document.getElementById('goal-salt').value)   || 5,
+  };
+  await setDoc(doc(db,'users',currentUser.uid), { bodyStats }, { merge: true });
+  toggleMacroGoals();
+  refreshMacroGoalsUI();
+  showToast('✓ Objectifs nutritionnels mis à jour');
+};
+
+function refreshMacroGoalsUI() {
+  const g = bodyStats.goals || {};
+  const el = document.getElementById('macro-goals-display');
+  if (el) el.textContent =
+    `P:${g.protein_g||278}g · G:${g.carbs_g||200}g · L:${g.fat_g||70}g · Fibres:${g.fiber_g||30}g · Sel:${g.salt_g||5}g`;
+}
+
 window.showToast = msg => {
   const t = document.getElementById('toast');
   t.textContent = msg; t.classList.add('show');
@@ -2637,3 +2780,4 @@ window.closeModal = id => document.getElementById(id).classList.remove('open');
 </script>
 </body>
 </html>
+
